@@ -1,0 +1,301 @@
+ <!DOCTYPE html>
+
+<html lang="ja">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>バームクーヘンタイマー</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background: #f5f5f5;
+    font-family: sans-serif;
+  }
+  .wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem 1rem 1.5rem;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+    width: 320px;
+  }
+  .hint { font-size: 13px; color: #999; margin-top: 0.8rem; }
+  .btn-row { display: flex; gap: 10px; margin-top: 1.2rem; width: 280px; }
+  .btn-row button {
+    flex: 1; padding: 11px 0; border-radius: 24px;
+    font-size: 14px; font-weight: 500; cursor: pointer;
+  }
+  #stopRow { display: none; margin-top: 1.2rem; width: 280px; }
+  #stopBtn {
+    width: 100%; padding: 13px 0; border-radius: 24px;
+    font-size: 15px; font-weight: 500; cursor: pointer;
+    border: none; letter-spacing: 0.05em;
+  }
+  .palette-label {
+    font-size: 12px; color: #bbb; text-align: center;
+    margin-bottom: 0.6rem; letter-spacing: 0.08em;
+  }
+  #paletteRow { display: flex; justify-content: center; gap: 12px; }
+  .modal-bg {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.35); z-index: 99;
+    align-items: center; justify-content: center;
+  }
+  .modal-bg.open { display: flex; }
+  .modal {
+    background: #fff; border-radius: 12px;
+    padding: 1.5rem; width: 260px;
+    border: 0.5px solid #ddd;
+  }
+  .modal h3 { font-size: 16px; font-weight: 500; margin-bottom: 1rem; color: #333; }
+  .time-inputs { display: flex; gap: 8px; align-items: center; justify-content: center; margin-bottom: 1.2rem; }
+  .time-inputs input {
+    width: 60px; text-align: center; font-size: 20px;
+    padding: 6px; border-radius: 8px;
+    border: 1px solid #ccc; background: #f5f5f5; color: #333;
+  }
+  .time-inputs span { font-size: 20px; color: #888; }
+  .modal-btns { display: flex; gap: 8px; }
+  .modal-btns button {
+    flex: 1; padding: 10px 0; border-radius: 24px;
+    border: none; font-size: 14px; font-weight: 500; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <canvas id="c" width="280" height="280"></canvas>
+
+  <div class="btn-row" id="mainBtns">
+    <button id="setBtn" style="border:1.5px solid #ed93b1;background:#fbeaf0;color:#72243e;">時間設定</button>
+    <button id="startBtn" style="border:none;background:#d4537e;color:#fff;">スタート</button>
+    <button id="resetBtn" style="border:none;background:#f4c0d1;color:#72243e;">リセット</button>
+  </div>
+
+  <div id="stopRow">
+    <button id="stopBtn" style="background:#d4537e;color:#fff;">通知音を止める</button>
+  </div>
+
+  <p id="hint" class="hint">「時間設定」で時間を決めてからスタート</p>
+
+  <div style="margin-top:1.4rem;width:280px;">
+    <p class="palette-label">カラーテーマ</p>
+    <div id="paletteRow"></div>
+  </div>
+</div>
+
+<div id="modal" class="modal-bg">
+  <div class="modal">
+    <h3>時間を設定</h3>
+    <div class="time-inputs">
+      <input type="number" id="inputMin" value="1" min="0" max="99"/>
+      <span>分</span>
+      <input type="number" id="inputSec" value="15" min="0" max="59"/>
+      <span>秒</span>
+    </div>
+    <div class="modal-btns">
+      <button id="cancelBtn" style="background:#eee;color:#555;">キャンセル</button>
+      <button id="okBtn" style="background:#d4537e;color:#fff;">セット</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W=280,H=280,cx=140,cy=140,R_OUT=122,R_IN=44,RINGS=8;
+const START=-Math.PI/2;
+
+const THEMES=[
+  {name:'ピンク',    light:'#fbeaf0',mid:'#f4c0d1',border:'#ed93b1',strong:'#d4537e',text:'#72243e'},
+  {name:'スカイ',    light:'#e8f4fb',mid:'#b5d4f4',border:'#85b7eb',strong:'#378add',text:'#0c447c'},
+  {name:'ミント',    light:'#e1f5ee',mid:'#9fe1cb',border:'#5dcaa5',strong:'#1d9e75',text:'#085041'},
+  {name:'ラベンダー',light:'#eeedfe',mid:'#cecbf6',border:'#afa9ec',strong:'#7f77dd',text:'#3c3489'},
+  {name:'ピーチ',    light:'#faece7',mid:'#f5c4b3',border:'#f0997b',strong:'#d85a30',text:'#4a1b0c'},
+  {name:'サンド',    light:'#f1efe8',mid:'#d3d1c7',border:'#b4b2a9',strong:'#888780',text:'#2c2c2a'},
+];
+let theme=THEMES[0];
+let totalSec=75,remainSec=75,running=false,timer=null;
+let audioCtx=null,alarmNodes=[],alarmInterval=null;
+
+function getAudioCtx(){
+  if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function playChime(){
+  const ac=getAudioCtx();
+  const notes=[523.25,659.25,783.99,1046.50];
+  notes.forEach((freq,i)=>{
+    const osc=ac.createOscillator();
+    const gain=ac.createGain();
+    osc.connect(gain);
+    gain.connect(ac.destination);
+    osc.type='sine';
+    osc.frequency.value=freq;
+    const t=ac.currentTime+i*0.28;
+    gain.gain.setValueAtTime(0,t);
+    gain.gain.linearRampToValueAtTime(0.18,t+0.05);
+    gain.gain.exponentialRampToValueAtTime(0.001,t+0.6);
+    osc.start(t);
+    osc.stop(t+0.65);
+    alarmNodes.push(osc);
+  });
+}
+
+function startAlarm(){
+  playChime();
+  alarmInterval=setInterval(playChime,2800);
+  document.getElementById('mainBtns').style.display='none';
+  document.getElementById('stopRow').style.display='block';
+}
+
+function stopAlarm(){
+  clearInterval(alarmInterval);
+  alarmNodes.forEach(n=>{try{n.stop();}catch(e){}});
+  alarmNodes=[];
+  document.getElementById('stopRow').style.display='none';
+  document.getElementById('mainBtns').style.display='flex';
+}
+
+function applyTheme(t){
+  theme=t;
+  document.getElementById('setBtn').style.background=theme.light;
+  document.getElementById('setBtn').style.borderColor=theme.border;
+  document.getElementById('setBtn').style.color=theme.text;
+  document.getElementById('startBtn').style.background=theme.strong;
+  document.getElementById('okBtn').style.background=theme.strong;
+  document.getElementById('stopBtn').style.background=theme.strong;
+  document.getElementById('resetBtn').style.background=theme.mid;
+  document.getElementById('resetBtn').style.color=theme.text;
+  document.querySelectorAll('.palette-dot').forEach((d,i)=>{
+    d.style.outline=THEMES[i]===theme?`2.5px solid ${THEMES[i].border}`:'none';
+    d.style.outlineOffset='2px';
+  });
+  draw();
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#fff';
+  ctx.fillRect(0,0,W,H);
+  const progress=totalSec>0?remainSec/totalSec:1;
+  const goneAngle=(1-progress)*Math.PI*2;
+  for(let i=0;i<RINGS;i++){
+    const r1=R_IN+(R_OUT-R_IN)*i/RINGS;
+    const r2=R_IN+(R_OUT-R_IN)*(i+1)/RINGS;
+    ctx.beginPath();
+    ctx.arc(cx,cy,r2,0,Math.PI*2);
+    ctx.arc(cx,cy,r1,Math.PI*2,0,true);
+    ctx.closePath();
+    ctx.fillStyle=i%2===0?theme.mid:theme.light;
+    ctx.fill();
+  }
+  if(progress<1){
+    ctx.save();
+    ctx.globalCompositeOperation='destination-out';
+    ctx.beginPath();
+    ctx.moveTo(cx,cy);
+    ctx.arc(cx,cy,R_OUT+2,START,START+goneAngle);
+    ctx.closePath();
+    ctx.fillStyle='rgba(0,0,0,1)';
+    ctx.fill();
+    ctx.restore();
+    ctx.beginPath();
+    ctx.moveTo(cx,cy);
+    ctx.arc(cx,cy,R_OUT+2,START,START+goneAngle);
+    ctx.closePath();
+    ctx.fillStyle='#fff';
+    ctx.fill();
+  }
+  ctx.beginPath();
+  ctx.arc(cx,cy,R_IN,0,Math.PI*2);
+  ctx.fillStyle=theme.mid;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx,cy,R_OUT,0,Math.PI*2);
+  ctx.strokeStyle=theme.border;
+  ctx.lineWidth=1.5;
+  ctx.stroke();
+  const m=Math.floor(remainSec/60),s=remainSec%60;
+  ctx.fillStyle=theme.text;
+  ctx.font='500 15px sans-serif';
+  ctx.textAlign='center';
+  ctx.textBaseline='middle';
+  ctx.fillText(`${m}:${String(s).padStart(2,'0')}`,cx,cy);
+}
+
+function tick(){
+  if(remainSec<=0){
+    clearInterval(timer);running=false;
+    document.getElementById('startBtn').textContent='スタート';
+    document.getElementById('hint').textContent='完了！お疲れさまでした';
+    draw();startAlarm();return;
+  }
+  remainSec--;draw();
+}
+
+document.getElementById('stopBtn').addEventListener('click',()=>{
+  stopAlarm();
+  document.getElementById('hint').textContent='お疲れさまでした';
+});
+document.getElementById('startBtn').addEventListener('click',()=>{
+  if(remainSec<=0)return;
+  if(running){
+    clearInterval(timer);running=false;
+    document.getElementById('startBtn').textContent='スタート';
+    document.getElementById('hint').textContent='一時停止中';
+  }else{
+    running=true;
+    document.getElementById('startBtn').textContent='一時停止';
+    document.getElementById('hint').textContent='タイマー稼働中';
+    timer=setInterval(tick,1000);
+  }
+});
+document.getElementById('resetBtn').addEventListener('click',()=>{
+  clearInterval(timer);running=false;remainSec=totalSec;
+  stopAlarm();
+  document.getElementById('startBtn').textContent='スタート';
+  document.getElementById('hint').textContent='「時間設定」で時間を決めてからスタート';
+  draw();
+});
+document.getElementById('setBtn').addEventListener('click',()=>{
+  if(running)return;
+  document.getElementById('inputMin').value=Math.floor(totalSec/60);
+  document.getElementById('inputSec').value=totalSec%60;
+  document.getElementById('modal').classList.add('open');
+});
+document.getElementById('cancelBtn').onclick=()=>document.getElementById('modal').classList.remove('open');
+document.getElementById('modal').onclick=e=>{if(e.target===document.getElementById('modal'))document.getElementById('modal').classList.remove('open');};
+document.getElementById('okBtn').onclick=()=>{
+  const m=parseInt(document.getElementById('inputMin').value)||0;
+  const s=parseInt(document.getElementById('inputSec').value)||0;
+  const t=m*60+s;
+  if(t>0){totalSec=t;remainSec=t;}
+  document.getElementById('modal').classList.remove('open');
+  document.getElementById('hint').textContent=`${m}分${s}秒 セット済 — スタートを押してください`;
+  draw();
+};
+
+const row=document.getElementById('paletteRow');
+THEMES.forEach((t,i)=>{
+  const dot=document.createElement('button');
+  dot.className='palette-dot';
+  dot.title=t.name;
+  dot.style.cssText=`width:28px;height:28px;border-radius:50%;background:${t.mid};border:2px solid ${t.border};cursor:pointer;padding:0;`;
+  dot.addEventListener('click',()=>applyTheme(t));
+  row.appendChild(dot);
+});
+
+applyTheme(THEMES[0]);
+</script>
+
+</body>
+</html>
