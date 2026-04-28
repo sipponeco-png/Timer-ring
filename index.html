@@ -166,6 +166,19 @@ const THEMES=[
 let theme=THEMES[0];
 let mode='timer';
 
+// 画面つけっぱなし機能
+let wakeLock=null;
+async function requestWakeLock(){
+  try{
+    if('wakeLock' in navigator){
+      wakeLock=await navigator.wakeLock.request('screen');
+    }
+  }catch(e){}
+}
+function releaseWakeLock(){
+  if(wakeLock){wakeLock.release();wakeLock=null;}
+}
+
 // タイマー
 let totalSec=75,remainSec=75,timerRunning=false,timerInterval=null;
 let audioCtx=null,alarmNodes=[],alarmInterval=null;
@@ -354,6 +367,7 @@ function timerTick(){
     clearInterval(timerInterval);timerRunning=false;
     document.getElementById('startBtn').textContent='スタート';
     document.getElementById('hint').textContent='完了！お疲れさまでした';
+    releaseWakeLock();
     draw();startAlarm();return;
   }
   remainSec--;draw();
@@ -364,16 +378,18 @@ document.getElementById('startBtn').addEventListener('click',()=>{
     clearInterval(timerInterval);timerRunning=false;
     document.getElementById('startBtn').textContent='スタート';
     document.getElementById('hint').textContent='一時停止中';
+    releaseWakeLock();
   }else{
     timerRunning=true;
     document.getElementById('startBtn').textContent='一時停止';
     document.getElementById('hint').textContent='タイマー稼働中';
     timerInterval=setInterval(timerTick,1000);
+    requestWakeLock();
   }
 });
 document.getElementById('resetBtn').addEventListener('click',()=>{
   clearInterval(timerInterval);timerRunning=false;remainSec=totalSec;
-  stopAlarm();
+  stopAlarm();releaseWakeLock();
   document.getElementById('startBtn').textContent='スタート';
   document.getElementById('hint').textContent='「時間設定」で時間を決めてからスタート';
   draw();
@@ -406,15 +422,18 @@ document.getElementById('swStartBtn').addEventListener('click',()=>{
     clearInterval(swInterval);swRunning=false;
     document.getElementById('swStartBtn').textContent='スタート';
     document.getElementById('hint').textContent='一時停止中';
+    releaseWakeLock();
   }else{
     swRunning=true;
     document.getElementById('swStartBtn').textContent='一時停止';
     document.getElementById('hint').textContent='計測中';
     swInterval=setInterval(()=>{swElapsed++;draw();},1000);
+    requestWakeLock();
   }
 });
 document.getElementById('swResetBtn').addEventListener('click',()=>{
   clearInterval(swInterval);swRunning=false;swElapsed=0;
+  releaseWakeLock();
   document.getElementById('swStartBtn').textContent='スタート';
   document.getElementById('hint').textContent='スタートを押して計測開始';
   draw();
